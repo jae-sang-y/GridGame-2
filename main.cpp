@@ -1,99 +1,67 @@
 #include <SDL.h>
 #include <Windows.h>
 
-#include <iostream>
-#include <memory>
-#include <random>
-#include <array>
-#include <fstream>
+import World;
+import std.core;
 
 using std::cout;
 using std::endl;
 using std::unique_ptr;
 using std::array;
+using std::vector;
 using std::ifstream;
 
-constexpr int SCREEN_WIDTH = 1024;
-constexpr int SCREEN_HEIGHT = 768;
-constexpr int BLOCK_SIZE = 4;
-constexpr int MAP_COLUMNS = 256;
-constexpr int MAP_ROWS = 192;
-constexpr int DISTRICT_SIZE = 64;
 
-static_assert(SCREEN_WIDTH == BLOCK_SIZE * MAP_COLUMNS);
-static_assert(SCREEN_HEIGHT == BLOCK_SIZE * MAP_ROWS);
+
 
 enum class SystemError : int {
 	FAIL_INIT_SDL=1,
 	FAIL_INIT_WINDOW,
+	FAIL_INIT_RENDERER,
 };
 
-struct Block {
-	enum class GeoType : int {
-		Plain,
-		Block
-	} geo = GeoType::Plain;
-	int owner = 0;
 
-	Block() = default;
-	Block(Block&) = delete;
-	Block(Block&&) = delete;
-};
 
 class Main {
 	SDL_Window* window = nullptr;
-	SDL_Surface* screen = nullptr;
-	std::mt19937_64 rnd{};
+	SDL_Renderer* renderer = nullptr;
 
-	array<array<Block, MAP_ROWS>, MAP_COLUMNS> blocks{};
+	World::World world{};
 public:
 	bool would_be_close = false;
 	uint64_t total_tick = 0;
 public:
 	int init() {
-		cout << "Hello world!" << endl;
 
-		ifstream file{ "geo.bmp", std::ios::ios_base::binary };
-		uint8_t buf[80000]{};
-		file.read((char*)buf, 80000);
 
-		if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+		if (SDL_Init(SDL_INIT_VIDEO) != 0) {
 			printf("%s\n", SDL_GetError());
 			return (int)SystemError::FAIL_INIT_SDL;
-		}
+		}  
+		SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
 		window = SDL_CreateWindow("SDL Tutorial",
 			SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-			SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN
+			World::SCREEN_WIDTH, World::SCREEN_HEIGHT, SDL_WINDOW_SHOWN
 		);
 		if (window == nullptr) {
 			printf("%s\n", SDL_GetError());
 			return (int)SystemError::FAIL_INIT_WINDOW;
 		}
 
-		screen = SDL_GetWindowSurface(window);
-
-		for (int x = 0; x < MAP_COLUMNS; ++x) {
-			for (int y = 0; y < MAP_ROWS; ++y) {
-				uint8_t B = buf[54 + (x + y * MAP_COLUMNS) * 3];
-				uint8_t G = buf[54 + (x + y * MAP_COLUMNS) * 3 + 1];
-				uint8_t R = buf[54 + (x + y * MAP_COLUMNS) * 3 + 1];
-				
-				
-
-				blocks[x][y].owner = rnd() % 3;
-				
-
-				float nx = sinf(x / 24.f);
-				float ny = sinf(y / 24.f);
-				if (B > 127)
-					blocks[x][y].geo = Block::GeoType::Block;
-			}
+		printf("%s\n", SDL_GetError());
+		renderer = SDL_CreateRenderer(window, -1, NULL);
+		if (renderer == nullptr) {
+			printf("%s\n", SDL_GetError());
+			return (int)SystemError::FAIL_INIT_RENDERER;
 		}
 
 
+		build_world(this->world);
 		return 0;
 	}
+
+
 
 	void loop() {
 		static SDL_Event _event{};
@@ -107,51 +75,107 @@ public:
 			}
 		}			
 
-
-		for (int x = 0; x < MAP_COLUMNS; ++x) {
-			for (int y = 0; y < MAP_ROWS; ++y) {
-				for (int z = 0; z < 4; ++z) {
-					static int vector[4][2] = { {0,1}, {-1,0},{0,-1},{1,0} };
-					int dx = x + vector[z][0];
-					int dy = y + vector[z][1];
-					if (dx >= 0 && dx < MAP_COLUMNS && dy >= 0 && dy < MAP_ROWS) {
-						if (rnd() % 100 < 5) {
-							blocks[dx][dy].owner = blocks[x][y].owner;
-						}
-					}
-				}
-			}
-		}
-
 	}
 
 	void draw() {
-		SDL_FillRect(screen, nullptr, 0x000000);
+		SDL_RenderClear(renderer);
 
 		static SDL_Rect rect{};
+		static uint32_t colors[20] = {
+			0x0d0221,0x0f084b,0x26408b,0xa6cfd5,0xc2e7d9,
+			0x28783d,0x64ba6d,0xa5f2b3,0x786528,0xba9961,
+			0xf2daa5,0x782832,0xba6179,0xf2a5b6,0x702878,
+			0xa561ba,0x34a5f2,0x787828,0xbaae61,0xf2eca5
+		};
 
-		rect.w = BLOCK_SIZE;
-		rect.h = BLOCK_SIZE;
+		rect.w = World::BLOCK_SIZE;
+		rect.h = World::BLOCK_SIZE;
 
-		for (int x = 0; x < MAP_COLUMNS; ++x) {
-			for (int y = 0; y < MAP_ROWS; ++y) {
-				rect.x = x * BLOCK_SIZE;
-				rect.y = y * BLOCK_SIZE;
-				if (blocks[x][y].geo == Block::GeoType::Block) {
-					SDL_FillRect(screen, &rect, 0x0e1038);
+		int path_finding_sx = 55;
+		int path_finding_sy = 85;
+		int path_finding_ex = 180;
+		int path_finding_ey = 150;
+
+		const auto path = World::path_finding(world, path_finding_sx, path_finding_sy, path_finding_ex, path_finding_ey);
+
+
+		for (int x = 0; x < World::BLOCK_COLS; ++x) {
+			for (int y = 0; y < World::BLOCK_ROWS; ++y) {
+				rect.x = x * World::BLOCK_SIZE;
+				rect.y = y * World::BLOCK_SIZE;
+				if (world.map[x][y].geo == World::Block::GeoType::Block) {
+					SDL_SetRenderDrawColor(renderer, 0x7e, 0x70, 0x98, 255);
+					SDL_RenderFillRect(renderer, &rect);
 				}
 				else {
-					if (blocks[x][y].owner == 0) SDL_FillRect(screen, &rect, 0x204070);
-					else if (blocks[x][y].owner == 1) SDL_FillRect(screen, &rect, 0x282070);
-					else SDL_FillRect(screen, &rect, 0x206870);
+					int bgr = colors[world.map[x][y].owner % 20];
+					int b = 0xff & (bgr >> 16);
+					int g = 0xff & (bgr >> 8);
+					int r = 0xff & (bgr);
+					SDL_SetRenderDrawColor(renderer, r, g, b, 255);
+					SDL_RenderFillRect(renderer, &rect);
 				}
 			}
 		}
-		SDL_UpdateWindowSurface(window);
+
+		SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+		rect.x = World::BLOCK_SIZE * path_finding_sx;
+		rect.y = World::BLOCK_SIZE * path_finding_sy;
+		SDL_RenderFillRect(renderer, &rect);
+		SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
+		rect.x = World::BLOCK_SIZE * path_finding_ex;
+		rect.y = World::BLOCK_SIZE * path_finding_ey;
+		SDL_RenderFillRect(renderer, &rect);
+
+		SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+		for (auto& [did, district] : world.districts) {
+			district.center_position_for_render(&rect);
+			int sx = rect.x;
+			int sy = rect.y;
+
+			rect.x -= 4;
+			rect.y -= 4;
+			rect.w = 8;
+			rect.h = 8;
+			SDL_RenderDrawRect(renderer, &rect);
+
+			for (const int& o_did : district.connections) {
+				const World::District& o_district = world.districts.at(o_did);
+				o_district.center_position_for_render(&rect);
+				int ex = rect.x;
+				int ey = rect.y;
+				SDL_RenderDrawLine(renderer, sx, sy, ex, ey);
+			}
+		}
+
+		{
+			int sx, sy, ex, ey;
+			SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+			world.districts[world.map[path_finding_sx][path_finding_sy].district_id].center_position_for_render(&rect);
+			sx = rect.x;
+			sy = rect.y;
+
+			for (int did : path) {
+				const auto& district = world.districts[did];
+				district.center_position_for_render(&rect);
+				ex = rect.x;
+				ey = rect.y;
+				SDL_RenderDrawLine(renderer, sx, sy, ex, ey);
+				sx = ex;
+				sy = ey;
+
+			}
+		}
+
+		SDL_RenderPresent(renderer);
 		++total_tick;
+
+		
+		
 	}
 
 	void destory() {
+		SDL_DestroyRenderer(renderer);
 		SDL_DestroyWindow(window);
 		SDL_Quit();
 	}
