@@ -30,6 +30,7 @@ export namespace World {
 	constexpr int DISTRICT_SIZE = 1 << DISTRICT_FACTOR;
 	constexpr int DISTRICT_COLS = c_ceil(1.f * BLOCK_COLS / DISTRICT_SIZE);
 	constexpr int DISTRICT_ROWS = c_ceil(1.f * BLOCK_ROWS / DISTRICT_SIZE);
+	constexpr const char* TITLE = "Grid Game 2";
 
 	static_assert(SCREEN_WIDTH == BLOCK_SIZE * BLOCK_COLS);
 	static_assert(SCREEN_HEIGHT == BLOCK_SIZE * BLOCK_ROWS);
