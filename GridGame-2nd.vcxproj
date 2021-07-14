@@ -164,8 +164,8 @@
     <ClCompile Include="world.ixx" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\frag.glsl" />
-    <None Include="shaders\vert.glsl" />
+    <None Include="shaders\shader.frag" />
+    <None Include="shaders\shader.vert" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
