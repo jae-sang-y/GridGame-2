@@ -58,3 +58,17 @@ export function rotate_vector(vec, c)
  {
    return 'rgb(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ')';
  }
+ 
+ export function rgba_to_hex(rgba)
+ {
+   return 'rgba(' + rgba.r + ',' + rgba.g + ',' + rgba.b + ',' + rgba.a + ')';
+ }
+ 
+ 
+ export function diff_from_to_angles(a, b)
+ {
+    let diff_angle = a - b;
+    while (diff_angle > +Math.PI) diff_angle -= 2 * Math.PI;
+    while (diff_angle < -Math.PI) diff_angle += 2 * Math.PI;
+    return diff_angle;
+ }
