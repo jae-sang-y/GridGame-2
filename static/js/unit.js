@@ -1,4 +1,5 @@
 import * as libmathutil from "/js/mathutil.js";
+import * as libemit from "/js/emit.js";
 
 export function create_unit(env, props) {
     let unit = {
@@ -23,10 +24,14 @@ export function create_unit(env, props) {
         attack_left_cooldown: 0,
         attack_cooldown: 20,
         attack_damage: 20,
+        attack_type: 'melee',
         defensiveness: 1,
         // side length = 20 + sqrt(health)
         health: 1600,
         sight_range: 200,
+        missile_speed: 2,
+        missile_stage: 100,
+        missile_damage_range: 80,
         unit_icon_name: '보병',
         
     };
@@ -110,6 +115,12 @@ export function attack_units(env, attacker, defender) {
     if (attacker.owner === defender.owner) return;
     attacker.attack_left_cooldown = attacker.attack_cooldown;
     
+    defender.health -= attacker.attack_damage_per_health * attacker.health / defender.defensiveness;
+    defender.w = Math.ceil(20 + Math.sqrt(defender.health));
+    defender.h = defender.w;
+}
+
+export function attack_units_range(env, attacker, defender) {
     defender.health -= attacker.attack_damage_per_health * attacker.health / defender.defensiveness;
     defender.w = Math.ceil(20 + Math.sqrt(defender.health));
     defender.h = defender.w;
@@ -211,10 +222,76 @@ export function step_units(env) {
                     if (distance <= unit.sight_range && (last_distance === null || last_distance > distance))
                     {
                         last_distance = distance;
-                        new_command = create_command(
-                            'move',
-                            {x: other.x, y: other.y, left_time: 10, force: true}
-                        );
+                        if (unit.attack_type === 'melee')
+                        {
+                            new_command = create_command(
+                                'move',
+                                {x: other.x, y: other.y, left_time: 10, force: true}
+                            );
+                        }
+                        else
+                        {
+                            
+                            if (unit.attack_left_cooldown === 0) 
+                            {
+                                let length = libmathutil.length_between_points(
+                                    unit.x, unit.y,
+                                    other.x, other.y
+                                );
+                                let length_per_tick = unit.missile_speed;
+                                unit.attack_left_cooldown = unit.attack_cooldown;
+                                let command_queue = [];
+                                
+                                let shoot_angle = 30 *(Math.PI/180);
+                                let velocity_height = Math.sin(shoot_angle);
+                                let stage = unit.missile_stage; 
+                                let gravity_constant = 2*velocity_height;
+                                let damage_range = unit.missile_damage_range;
+                                let expansion_size = 30;
+                                for (let time = 0; time < 1; time += 1 / stage) 
+                                {
+                                    let h = velocity_height*time-gravity_constant*Math.pow(time,2)/2;
+                                    command_queue.push({
+                                        type: 'morph', 
+                                        x: unit.x * (1-time) + other.x * time,
+                                        y: unit.y * (1-time) + other.y * time,
+                                        duration: length/stage/length_per_tick,
+                                        w: 5*(1+h * expansion_size), 
+                                        h: 5*(1+h * expansion_size)
+                                    });
+                                }
+                                command_queue.push({
+                                    type: 'morph', duration: 20,
+                                    w: damage_range, h: damage_range,
+                                    color: {r:255, g:0, b:0, a:0},
+                                });
+                                command_queue.push({
+                                    type: 'function',
+                                    callback: emit => {
+                                        for (let other of env.units) {
+                                            let length = libmathutil.length_between_points(
+                                                emit.x, emit.y,
+                                                other.x, other.y
+                                            );
+                                            if (length < damage_range) {
+                                                attack_units_range(env, unit, other);
+                                            }
+                                        }
+                                    }
+                                });
+                                env.emits.push(
+                                    libemit.create_emit(
+                                        env, 
+                                        {
+                                            x: unit.x, y: unit.y,
+                                            base_color: {r:40,g:40,b:40,a:0.75},
+                                            w: 5, h: 5,
+                                            command_queue: command_queue
+                                        }
+                                    )
+                                );
+                            }
+                        }
                     }
                 }
                 if (new_command !== null)

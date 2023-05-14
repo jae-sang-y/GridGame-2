@@ -48,14 +48,18 @@ function init() {
     let unit_포병 = {
         health: 200, unit_icon_name: '포병',
         move_speed: 1, move_angle_speed: 1.0,
-        attack_damage: 75, attack_cooldown: 50,
+        attack_damage: 75, attack_cooldown: 250,
+        sight_range: 400,
+        attack_type: 'range',
     };
     
     let unit_전차 = {
         health: 1600, unit_icon_name: '전차',
         move_speed: 6, move_angle_speed: 3.0,
-        defensiveness: 20, sight_range: 400,
-        attack_damage: 275, attack_cooldown: 5,
+        defensiveness: 20, sight_range: 200,
+        attack_damage: 300, attack_cooldown: 50,
+        attack_type: 'range', 
+        missile_speed: 15, missile_stage: 20, missile_damage_range: 40,
     };
     
     for (let x = 0; x < 18; ++x)
@@ -126,9 +130,6 @@ function init() {
         env.img.unit[img_name] = new_img;
     }
     
-    env.emits.push(
-        libemit.create_emit(env, {x: 500, y: 500})
-    );
 
     setInterval(main, 10);
 }
@@ -315,7 +316,10 @@ function draw() {
 
 function main() {
     if (env.paused === false)
-        libunit.step_units( env);
+    {
+        libunit.step_units(env);
+        libemit.step_emits(env);
+    }
     
     draw();
     
