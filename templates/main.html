@@ -8,6 +8,9 @@
         <canvas id="canvas" style="border: 1px solid" width="1024" height="768"
         oncontextmenu="return false;"
         ></canvas>
+        <br/>
+        <input disabled id="extbtn_save" type="button" value="저장"/>
+        <input disabled id="extbtn_load" type="button" value="불러오기"/>
     </body>
     <script type="module" src={{ url_for('static', filename='js/engine/engine.js') }}></script>
     <script type="module" src={{ url_for('static', filename='js/index.js') }}></script>

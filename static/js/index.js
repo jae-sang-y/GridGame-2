@@ -1,6 +1,44 @@
 import * as libengine from "/js/engine/engine.js";
 import * as libengine_gameobject from "/js/engine/gameobject.js";
 import * as libengine_gameinstance from "/js/engine/gameinstance.js";
+import { firebaseConfig } from "/js/firebase_config.js";
+import * as libfirebase_app from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
+import * as libfirebase_auth from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js';
+import * as libfirebase_firestore from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js';
+function require(url){
+    if (url.toLowerCase().substr(-3)!=='.js') url+='.js'; // to allow loading without js suffix;
+    if (!require.cache) require.cache=[]; //init cache
+    var exports=require.cache[url]; //get from cache
+    if (!exports) { //not cached
+            try {
+                exports={};
+                var X=new XMLHttpRequest();
+                X.open("GET", url, 0); // sync
+                X.send();
+                if (X.status && X.status !== 200)  throw new Error(X.statusText);
+                var source = X.responseText;
+                // fix (if saved form for Chrome Dev Tools)
+                if (source.substr(0,10)==="(function("){ 
+                    var moduleStart = source.indexOf('{');
+                    var moduleEnd = source.lastIndexOf('})');
+                    var CDTcomment = source.indexOf('//@ ');
+                    if (CDTcomment>-1 && CDTcomment<moduleStart+6) moduleStart = source.indexOf('\n',CDTcomment);
+                    source = source.slice(moduleStart+1,moduleEnd-1); 
+                } 
+                // fix, add comment to show source on Chrome Dev Tools
+                source="//@ sourceURL="+window.location.origin+url+"\n" + source;
+                //------
+                var module = { id: url, uri: url, exports:exports }; //according to node.js modules 
+                var anonFn = new Function("require", "exports", "module", source); //create a Fn with module code, and 3 params: require, exports & module
+                anonFn(require, exports, module); // call the Fn, Execute the module
+                require.cache[url]  = exports = module.exports; //cache obj exported by module
+            } catch (err) {
+                throw new Error("Error loading module "+url+": "+err);
+            }
+    }
+    return exports; //require returns object exported by module
+}
+const jsonpack = require("/js/jsonpack.js");
 
 globalThis.engine = new libengine.Engine;
 function check_collision_aabb_aabb(aabb1, aabb2) {
@@ -48,6 +86,7 @@ document.body.onload = function () {
                 translation: {x: 0, y: 0},
                 scale: 6,
             };
+            i.logined = false;
             i.blocks = {};
             for (let block_x = 0; block_x < i.map_size.w; ++block_x) {
                 let chunk_x = Math.floor(block_x / i.chunk_size);
@@ -72,12 +111,108 @@ document.body.onload = function () {
                     block.rect.x2 = block.rect.x1 + i.projection.scale;
                     block.rect.y2 = block.rect.y1 + i.projection.scale;
                     
-                    i.blocks[block_x+'.'+block_y] = block;
+                    i.blocks[block_x+','+block_y] = block;
                 }
             }
-                    
+            i.save = async () => {
+                function* generator() {
+                    for (let block_x = 0; block_x < i.map_size.w; ++block_x) {
+                        for (let block_y = 0; block_y < i.map_size.h; ++block_y) {
+                            let block_key = block_x+','+block_y;
+                            let block = i.blocks[block_key];
+                            yield {
+                                key: block_key,
+                                value: {
+                                    type: block.type
+                                }
+                            };
+                        }
+                    }
+                }
+                const gen = generator();
+                const big_json = JSON.stringify(Array.from(gen));
+                const compressed_json = jsonpack.pack(big_json);
+                console.log('big_json', big_json.length);
+                console.log('compressed_json', compressed_json.length);
+                
+                function chunking(data) {
+                    let start_at = 0;
+                    let result = [];
+                    const CHUNK_SIZE = 1048487;
+                    while (start_at + CHUNK_SIZE < data.length) 
+                    {
+                        result.push(data.substr(start_at, CHUNK_SIZE));
+                        start_at += CHUNK_SIZE;
+                    }
+                    if (start_at < data.length)
+                        result.push(data.substr(start_at));
+                    return result;
+                }
+                
+                let chunked_data = chunking(compressed_json);
+                console.log('saving...', 'blocks/meta');
+                await libfirebase_firestore.setDoc(
+                    libfirebase_firestore.doc(i.firestore, 'blocks/meta'), 
+                    {length: chunked_data.length}
+                );
+                for (let k = 0; k < chunked_data.length; ++k) {
+                    console.log('saving...', 'blocks/'+k);
+                    await libfirebase_firestore.setDoc(
+                        libfirebase_firestore.doc(i.firestore, 'blocks/'+k), 
+                        {value: chunked_data[k]}
+                    );
+                }
+                
+                alert('save fnished');
+            };
+            i.load = async () => {
+                console.log('loading...', 'blocks/meta');
+                let blocks_length = (await libfirebase_firestore.getDoc(
+                    libfirebase_firestore.doc(i.firestore, 'blocks/meta'),
+                )).get('length');
+                console.log('blocks_meta', blocks_length);
+                let compressed_json = '';
+                for (let k = 0; k < blocks_length; ++k) {
+                    compressed_json += (await libfirebase_firestore.getDoc(
+                        libfirebase_firestore.doc(i.firestore, 'blocks/'+k),
+                    )).get('value');
+                }
+                console.log('compressed_json', compressed_json.length);
+                const big_json = jsonpack.unpack(compressed_json);
+                big_json.forEach(
+                    tup => {
+                        Object.assign(i.blocks[tup.key], tup.value);
+                    }
+                );
+                
+                alert('load fnished');
+            };
+            console.log(libfirebase_auth);
+            console.log('begin>>> initializeApp');
+            i.app = libfirebase_app.initializeApp(firebaseConfig);
+            console.log('begin>>> initializeAuth');
+            i.auth = libfirebase_auth.initializeAuth(i.app);
+            console.log('begin>>> signInAnonymously');
+            libfirebase_auth.signInAnonymously(i.auth).then(
+                async () => {
+                    i.logined = true;
+                    console.log('begin>>> getFirestore');
+                    i.firestore = libfirebase_firestore.getFirestore(i.app);
+                    console.log('finish>>> getFirestore');
+                    document.getElementById('extbtn_save').removeAttribute('disabled');
+                    document.getElementById('extbtn_load').removeAttribute('disabled');
+                    i.load();
+                }
+            );
+            
         },
         event_handlers: {
+            extbtn_save: (i,e) => {
+                i.save();
+            },
+            extbtn_load: (i,e) => {
+                i.load();
+            },
             keydown: (i,e) => { 
                 if (e.key === '[') {
                     i.ui.brush_size = Math.floor(i.ui.brush_size * 0.8);
@@ -121,7 +256,7 @@ document.body.onload = function () {
                     {
                         for (let block_y = brush_region.y1; block_y <= brush_region.y2; ++block_y)
                         {
-                            let block = i.blocks[block_x+'.'+block_y];
+                            let block = i.blocks[block_x+','+block_y];
                             if (length_between_x_y_x_y(block_x, block_y, i.ui.selected.x, i.ui.selected.y) < i.ui.brush_size) 
                             {
                                 block.type = i.ui.brush_color;
@@ -145,7 +280,7 @@ document.body.onload = function () {
                 if (delta_scale != 0) {
                     for (let block_x = 0; block_x < i.map_size.w; ++block_x) {
                         for (let block_y = 0; block_y < i.map_size.h; ++block_y) {
-                            let block = i.blocks[block_x+'.'+block_y];
+                            let block = i.blocks[block_x+','+block_y];
                             block.rect = {
                                 x1: i.projection.translation.x + block_x * i.projection.scale,
                                 y1: i.projection.translation.y + block_y * i.projection.scale,
@@ -168,7 +303,7 @@ document.body.onload = function () {
                 i.projection.translation.y = i.ui.drag_origin.y + globalThis.engine.mouse_y - i.ui.drag_origin.mouse_y;
                 for (let block_x = 0; block_x < i.map_size.w; ++block_x) {
                     for (let block_y = 0; block_y < i.map_size.h; ++block_y) {
-                        let block = i.blocks[block_x+'.'+block_y];
+                        let block = i.blocks[block_x+','+block_y];
                         block.rect = {
                             x1: i.projection.translation.x + block_x * i.projection.scale,
                             y1: i.projection.translation.y + block_y * i.projection.scale,
@@ -192,7 +327,7 @@ document.body.onload = function () {
                 let chunk_x = Math.floor(block_x / i.chunk_size);
                 for (let block_y = 0; block_y < i.map_size.h; ++block_y) {
                     let chunk_y = Math.floor(block_y / i.chunk_size);
-                    const block = i.blocks[block_x+'.'+block_y];
+                    const block = i.blocks[block_x+','+block_y];
                     
                     if (check_collision_aabb_aabb(screen_rect, block.rect)) {
                         
@@ -227,7 +362,7 @@ document.body.onload = function () {
             {
                 for (let block_y = brush_region.y1; block_y <= brush_region.y2; ++block_y)
                 {
-                    const block = i.blocks[block_x+'.'+block_y];
+                    const block = i.blocks[block_x+','+block_y];
                     if (length_between_x_y_x_y(block_x, block_y, i.ui.selected.x, i.ui.selected.y) < i.ui.brush_size) 
                     {
                         ctx.fillStyle = "rgba(255, 0, 255, 0.33)";
@@ -248,6 +383,16 @@ document.body.onload = function () {
     window.onkeydown = (e) => globalThis.engine.push_event(e);
     window.onmouseup = (e) => globalThis.engine.push_event(e);
     window.onmousewheel = (e) => globalThis.engine.push_event(e);
+    document.getElementById('extbtn_save').onclick = () => {
+        globalThis.engine.push_event({
+            type: 'extbtn_save'
+        });
+    };
+    document.getElementById('extbtn_load').onclick = () => {
+        globalThis.engine.push_event({
+            type: 'extbtn_load'
+        });
+    };
     globalThis.engine.start();
     
 };
